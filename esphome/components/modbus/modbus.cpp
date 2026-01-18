@@ -218,6 +218,12 @@ float Modbus::get_setup_priority() const {
 
 void Modbus::send(uint8_t address, uint8_t function_code, uint16_t start_address, uint16_t number_of_entities,
                   uint8_t payload_len, const uint8_t *payload, ModbusDevice *device) {
+  if (this->waiting_for_response != nullptr && this->waiting_for_response != device) {
+      ESP_LOGV(TAG, "Modbus busy (waiting for response from 0x%02X), dropping request to 0x%02X", 
+               this->waiting_for_response->address_, address);
+      return;
+  }
+
   static const size_t MAX_VALUES = 128;
 
   // Only check max number of registers for standard function codes
@@ -277,6 +283,12 @@ void Modbus::send(uint8_t address, uint8_t function_code, uint16_t start_address
 void Modbus::send_raw(const std::vector<uint8_t> &payload, ModbusDevice *device) {
   if (payload.empty()) {
     return;
+  }
+
+  if (this->waiting_for_response != nullptr && this->waiting_for_response != device) {
+      ESP_LOGV(TAG, "Modbus busy (waiting for response from 0x%02X), dropping raw request to 0x%02X", 
+               this->waiting_for_response->address_, payload[0]);
+      return;
   }
 
   if (this->flow_control_pin_ != nullptr)
