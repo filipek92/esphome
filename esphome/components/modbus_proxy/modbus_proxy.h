@@ -15,6 +15,7 @@ class ModbusProxy : public modbus::ModbusDevice, public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
   void set_port(uint16_t port) { port_ = port; }
   
