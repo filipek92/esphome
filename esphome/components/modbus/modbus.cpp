@@ -42,10 +42,10 @@ void Modbus::loop() {
 
     // stop blocking new send commands after sent_wait_time_ ms after response received
     if (now - this->last_send_ > send_wait_time_) {
-      if (waiting_for_response > 0) {
-        ESP_LOGV(TAG, "Stop waiting for response from %d", waiting_for_response);
+      if (waiting_for_response != nullptr) {
+        ESP_LOGV(TAG, "Stop waiting for response from %d", waiting_for_response->address_);
       }
-      waiting_for_response = 0;
+      waiting_for_response = nullptr;
     }
   }
 }
@@ -151,43 +151,51 @@ bool Modbus::parse_modbus_byte_(uint8_t byte) {
     }
   }
   std::vector<uint8_t> data(this->rx_buffer_.begin() + data_offset, this->rx_buffer_.begin() + data_offset + data_len);
-  bool found = false;
-  for (auto *device : this->devices_) {
-    if (device->address_ == address) {
-      found = true;
-      // Is it an error response?
-      if ((function_code & FUNCTION_CODE_EXCEPTION_MASK) == FUNCTION_CODE_EXCEPTION_MASK) {
-        ESP_LOGD(TAG, "Modbus error function code: 0x%X exception: %d", function_code, raw[2]);
-        if (waiting_for_response != 0) {
-          device->on_modbus_error(function_code & FUNCTION_CODE_MASK, raw[2]);
-        } else {
-          // Ignore modbus exception not related to a pending command
-          ESP_LOGD(TAG, "Ignoring Modbus error - not expecting a response");
-        }
-        continue;
+  
+  ModbusDevice *device = nullptr;
+  if (this->waiting_for_response != nullptr && this->waiting_for_response->address_ == address) {
+    device = this->waiting_for_response;
+  }
+  if (device == nullptr) {
+    for (auto *dev : this->devices_) {
+      if (dev->address_ == address) {
+        device = dev;
+        break;
       }
+    }
+  }
+
+  if (device != nullptr) {
+    // Is it an error response?
+    if ((function_code & FUNCTION_CODE_EXCEPTION_MASK) == FUNCTION_CODE_EXCEPTION_MASK) {
+      ESP_LOGD(TAG, "Modbus error function code: 0x%X exception: %d", function_code, raw[2]);
+      if (waiting_for_response == device) {
+        device->on_modbus_error(function_code & FUNCTION_CODE_MASK, raw[2]);
+      } else {
+        // Ignore modbus exception not related to a pending command
+        ESP_LOGD(TAG, "Ignoring Modbus error - not expecting a response");
+      }
+    } else {
+      bool handled = false;
       if (this->role == ModbusRole::SERVER) {
         if (function_code == ModbusFunctionCode::READ_HOLDING_REGISTERS ||
             function_code == ModbusFunctionCode::READ_INPUT_REGISTERS) {
           device->on_modbus_read_registers(function_code, uint16_t(data[1]) | (uint16_t(data[0]) << 8),
                                            uint16_t(data[3]) | (uint16_t(data[2]) << 8));
-          continue;
-        }
-        if (function_code == ModbusFunctionCode::WRITE_SINGLE_REGISTER ||
+          handled = true;
+        } else if (function_code == ModbusFunctionCode::WRITE_SINGLE_REGISTER ||
             function_code == ModbusFunctionCode::WRITE_MULTIPLE_REGISTERS) {
           device->on_modbus_write_registers(function_code, data);
-          continue;
+          handled = true;
         }
       }
-      // fallthrough for other function codes
-      device->on_modbus_data(data);
+      if (!handled)
+        device->on_modbus_data(data);
     }
-  }
-  waiting_for_response = 0;
-
-  if (!found) {
+  } else {
     ESP_LOGW(TAG, "Got Modbus frame from unknown address 0x%02X! ", address);
   }
+  waiting_for_response = nullptr;
 
   // reset buffer
   ESP_LOGV(TAG, "Clearing buffer of %d bytes - parse succeeded", at);
@@ -209,7 +217,7 @@ float Modbus::get_setup_priority() const {
 }
 
 void Modbus::send(uint8_t address, uint8_t function_code, uint16_t start_address, uint16_t number_of_entities,
-                  uint8_t payload_len, const uint8_t *payload) {
+                  uint8_t payload_len, const uint8_t *payload, ModbusDevice *device) {
   static const size_t MAX_VALUES = 128;
 
   // Only check max number of registers for standard function codes
@@ -256,7 +264,7 @@ void Modbus::send(uint8_t address, uint8_t function_code, uint16_t start_address
 
   if (this->flow_control_pin_ != nullptr)
     this->flow_control_pin_->digital_write(false);
-  waiting_for_response = address;
+  waiting_for_response = device;
   last_send_ = millis();
 #if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
   char hex_buf[format_hex_pretty_size(MODBUS_MAX_LOG_BYTES)];
@@ -266,7 +274,7 @@ void Modbus::send(uint8_t address, uint8_t function_code, uint16_t start_address
 
 // Helper function for lambdas
 // Send raw command. Except CRC everything must be contained in payload
-void Modbus::send_raw(const std::vector<uint8_t> &payload) {
+void Modbus::send_raw(const std::vector<uint8_t> &payload, ModbusDevice *device) {
   if (payload.empty()) {
     return;
   }
@@ -281,7 +289,7 @@ void Modbus::send_raw(const std::vector<uint8_t> &payload) {
   this->flush();
   if (this->flow_control_pin_ != nullptr)
     this->flow_control_pin_->digital_write(false);
-  waiting_for_response = payload[0];
+  waiting_for_response = device;
 #if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
   char hex_buf[format_hex_pretty_size(MODBUS_MAX_LOG_BYTES)];
 #endif
