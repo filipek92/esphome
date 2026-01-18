@@ -64,6 +64,7 @@ void Modbus::loop() {
     ESP_LOGW(TAG, "Stop waiting for response from %" PRIu8 " %" PRIu32 "ms after last send",
              this->waiting_for_response_, millis() - this->last_send_);
     this->waiting_for_response_ = 0;
+    this->current_requester_ = nullptr;
   }
 
   // If there's no response pending and there's commands in the buffer
@@ -229,41 +230,52 @@ bool Modbus::parse_modbus_byte_(uint8_t byte) {
   }
   std::vector<uint8_t> data(this->rx_buffer_.begin() + data_offset, this->rx_buffer_.begin() + data_offset + data_len);
   bool found = false;
-  for (auto *device : this->devices_) {
-    if (device->address_ == address) {
-      found = true;
-      if (this->role == ModbusRole::SERVER) {
-        if (function_code == ModbusFunctionCode::READ_HOLDING_REGISTERS ||
-            function_code == ModbusFunctionCode::READ_INPUT_REGISTERS) {
-          device->on_modbus_read_registers(function_code, uint16_t(data[1]) | (uint16_t(data[0]) << 8),
-                                           uint16_t(data[3]) | (uint16_t(data[2]) << 8));
-        } else if (function_code == ModbusFunctionCode::WRITE_SINGLE_REGISTER ||
-                   function_code == ModbusFunctionCode::WRITE_MULTIPLE_REGISTERS) {
-          device->on_modbus_write_registers(function_code, data);
+
+  // If a specific device queued this request, dispatch only to that device.
+  // Otherwise, broadcast to all devices with matching address.
+  auto dispatch_to_device = [&](ModbusDevice *device) {
+    found = true;
+    if (this->role == ModbusRole::SERVER) {
+      if (function_code == ModbusFunctionCode::READ_HOLDING_REGISTERS ||
+          function_code == ModbusFunctionCode::READ_INPUT_REGISTERS) {
+        device->on_modbus_read_registers(function_code, uint16_t(data[1]) | (uint16_t(data[0]) << 8),
+                                         uint16_t(data[3]) | (uint16_t(data[2]) << 8));
+      } else if (function_code == ModbusFunctionCode::WRITE_SINGLE_REGISTER ||
+                 function_code == ModbusFunctionCode::WRITE_MULTIPLE_REGISTERS) {
+        device->on_modbus_write_registers(function_code, data);
+      }
+    } else {  // We're a client
+      // Is it an error response?
+      if ((function_code & FUNCTION_CODE_EXCEPTION_MASK) == FUNCTION_CODE_EXCEPTION_MASK) {
+        uint8_t exception = raw[2];
+        ESP_LOGW(TAG,
+                 "Error function code: 0x%X exception: %" PRIu8 ", address: %" PRIu8 ", %" PRIu32
+                 "ms after last send",
+                 function_code, exception, address, millis() - this->last_send_);
+        if (this->waiting_for_response_ == address) {
+          device->on_modbus_error(function_code & FUNCTION_CODE_MASK, exception);
+        } else {
+          // Ignore modbus exception not related to a pending command
+          ESP_LOGD(TAG, "Ignoring error - not expecting a response from %" PRIu8 "", address);
         }
-      } else {  // We're a client
-        // Is it an error response?
-        if ((function_code & FUNCTION_CODE_EXCEPTION_MASK) == FUNCTION_CODE_EXCEPTION_MASK) {
-          uint8_t exception = raw[2];
-          ESP_LOGW(TAG,
-                   "Error function code: 0x%X exception: %" PRIu8 ", address: %" PRIu8 ", %" PRIu32
-                   "ms after last send",
-                   function_code, exception, address, millis() - this->last_send_);
-          if (this->waiting_for_response_ == address) {
-            device->on_modbus_error(function_code & FUNCTION_CODE_MASK, exception);
-          } else {
-            // Ignore modbus exception not related to a pending command
-            ESP_LOGD(TAG, "Ignoring error - not expecting a response from %" PRIu8 "", address);
-          }
-        } else {  // Not an error response
-          if (this->waiting_for_response_ == address) {
-            device->on_modbus_data(data);
-          } else {
-            // Ignore modbus response not related to a pending command
-            ESP_LOGW(TAG, "Ignoring response - not expecting a response from %" PRIu8 ", %" PRIu32 "ms after last send",
-                     address, millis() - this->last_send_);
-          }
+      } else {  // Not an error response
+        if (this->waiting_for_response_ == address) {
+          device->on_modbus_data(data);
+        } else {
+          // Ignore modbus response not related to a pending command
+          ESP_LOGW(TAG, "Ignoring response - not expecting a response from %" PRIu8 ", %" PRIu32 "ms after last send",
+                   address, millis() - this->last_send_);
         }
+      }
+    }
+  };
+
+  if (this->current_requester_ != nullptr) {
+    dispatch_to_device(this->current_requester_);
+  } else {
+    for (auto *device : this->devices_) {
+      if (device->address_ == address) {
+        dispatch_to_device(device);
       }
     }
   }
@@ -277,6 +289,7 @@ bool Modbus::parse_modbus_byte_(uint8_t byte) {
 
   if (this->waiting_for_response_ == address)
     this->waiting_for_response_ = 0;
+  this->current_requester_ = nullptr;
 
   return true;
 }
@@ -293,6 +306,7 @@ void Modbus::send_next_frame_() {
   if (this->role == ModbusRole::CLIENT) {
     this->waiting_for_response_ = frame.data.get()[0];
   }
+  this->current_requester_ = frame.device;
 
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->digital_write(true);
@@ -335,7 +349,7 @@ float Modbus::get_setup_priority() const {
 }
 
 void Modbus::send(uint8_t address, uint8_t function_code, uint16_t start_address, uint16_t number_of_entities,
-                  uint8_t payload_len, const uint8_t *payload) {
+                  uint8_t payload_len, const uint8_t *payload, ModbusDevice *device) {
   static const size_t MAX_VALUES = 128;
 
   // Only check max number of registers for standard function codes
@@ -376,12 +390,12 @@ void Modbus::send(uint8_t address, uint8_t function_code, uint16_t start_address
     }
   }
 
-  this->queue_raw_(data, pos);
+  this->queue_raw_(data, pos, device);
 }
 
 // Helper function for lambdas
 // Send raw command. Except CRC everything must be contained in payload
-void Modbus::send_raw(const std::vector<uint8_t> &payload) {
+void Modbus::send_raw(const std::vector<uint8_t> &payload, ModbusDevice *device) {
   if (payload.empty()) {
     return;
   }
@@ -395,14 +409,14 @@ void Modbus::send_raw(const std::vector<uint8_t> &payload) {
 
   std::memcpy(data, payload.data(), payload.size());
 
-  this->queue_raw_(data, payload.size());
+  this->queue_raw_(data, payload.size(), device);
 }
 
 // Assume data and length is valid and append CRC, then queue for sending. Used internally to avoid unnecessary copying
 // of data into vectors
-void Modbus::queue_raw_(const uint8_t *data, uint16_t len) {
+void Modbus::queue_raw_(const uint8_t *data, uint16_t len, ModbusDevice *device) {
   if (this->tx_buffer_.size() < MODBUS_TX_BUFFER_SIZE) {
-    this->tx_buffer_.emplace_back(data, len);
+    this->tx_buffer_.emplace_back(data, len, device);
   } else {
 #if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_ERROR
     char hex_buf[format_hex_pretty_size(MODBUS_MAX_LOG_BYTES)];
