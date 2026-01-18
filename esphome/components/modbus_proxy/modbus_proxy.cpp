@@ -51,12 +51,10 @@ void ModbusProxy::loop() {
      auto client = std::make_unique<Client>();
      client->socket = std::move(client_sock);
      
-     char addr_str[socket::SOCKADDR_STR_LEN];
-     client->socket->getpeername_to(addr_str);
-     client->identifier = addr_str;
+     client->identifier = "TCP Client";
      client->last_activity = millis();
      
-     ESP_LOGD(TAG, "New connection from %s", client->identifier.c_str());
+     ESP_LOGD(TAG, "New connection");
      this->clients_.push_back(std::move(client));
   }
   
