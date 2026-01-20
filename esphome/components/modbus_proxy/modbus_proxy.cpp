@@ -137,6 +137,11 @@ void ModbusProxy::loop() {
   
   this->process_queue_();
   this->check_cleanup_clients_();
+  
+  if (this->clients_connected_sensor_ != nullptr) {
+      if (this->clients_connected_sensor_->state != this->clients_.size())
+          this->clients_connected_sensor_->publish_state(this->clients_.size());
+  }
 }
 
 void ModbusProxy::process_queue_() {
@@ -145,6 +150,10 @@ void ModbusProxy::process_queue_() {
         if (millis() - this->current_request_.timestamp > 2000) { 
              ESP_LOGW(TAG, "Transaction timed out");
              this->busy_ = false;
+             this->error_count_++;
+             if (this->errors_sensor_ != nullptr) {
+                 this->errors_sensor_->publish_state(this->error_count_);
+             }
         }
         return;
     }
@@ -259,6 +268,11 @@ void ModbusProxy::send_tcp_response_(Client *client, uint16_t transaction_id, ui
     ESP_LOGV(TAG, "Sending Modbus TCP Response TransID=%d Len=%zu", transaction_id, frame.size());
 
     client->socket->write(frame.data(), frame.size());
+    
+    this->message_count_++;
+    if (this->messages_handled_sensor_ != nullptr) {
+        this->messages_handled_sensor_->publish_state(this->message_count_);
+    }
 }
 
 void ModbusProxy::send_tcp_error_(Client *client, uint16_t transaction_id, uint16_t protocol_id, uint8_t unit_id, uint8_t function_code, uint8_t exception_code) {
@@ -279,6 +293,11 @@ void ModbusProxy::send_tcp_error_(Client *client, uint16_t transaction_id, uint1
     ESP_LOGW(TAG, "Sending Modbus TCP Error TransID=%d Exception=%d", transaction_id, exception_code);
 
     client->socket->write(frame.data(), frame.size());
+    
+    this->error_count_++;
+    if (this->errors_sensor_ != nullptr) {
+        this->errors_sensor_->publish_state(this->error_count_);
+    }
 }
 
 void ModbusProxy::check_cleanup_clients_() {

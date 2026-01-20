@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/modbus/modbus.h"
 #include "esphome/components/socket/socket.h"
+#include "esphome/components/sensor/sensor.h"
 #include <vector>
 #include <memory>
 #include <deque>
@@ -18,6 +19,9 @@ class ModbusProxy : public modbus::ModbusDevice, public Component {
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
   void set_port(uint16_t port) { port_ = port; }
+  void set_clients_connected_sensor(sensor::Sensor *sensor) { clients_connected_sensor_ = sensor; }
+  void set_messages_handled_sensor(sensor::Sensor *sensor) { messages_handled_sensor_ = sensor; }
+  void set_errors_sensor(sensor::Sensor *sensor) { errors_sensor_ = sensor; }
   
   // ModbusDevice implementation
   void on_modbus_data(const std::vector<uint8_t> &data) override;
@@ -25,6 +29,12 @@ class ModbusProxy : public modbus::ModbusDevice, public Component {
 
  protected:
   uint16_t port_{502};
+  sensor::Sensor *clients_connected_sensor_{nullptr};
+  sensor::Sensor *messages_handled_sensor_{nullptr};
+  sensor::Sensor *errors_sensor_{nullptr};
+  
+  uint32_t message_count_{0};
+  uint32_t error_count_{0};
   std::unique_ptr<socket::Socket> server_socket_;
   
   struct Client {
