@@ -19,6 +19,7 @@ class ModbusProxy : public modbus::ModbusDevice, public Component {
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
   void set_port(uint16_t port) { port_ = port; }
+  void set_request_queue_limit(size_t limit) { request_queue_limit_ = limit; }
   void set_clients_connected_sensor(sensor::Sensor *sensor) { clients_connected_sensor_ = sensor; }
   void set_messages_handled_sensor(sensor::Sensor *sensor) { messages_handled_sensor_ = sensor; }
   void set_errors_sensor(sensor::Sensor *sensor) { errors_sensor_ = sensor; }
@@ -29,6 +30,7 @@ class ModbusProxy : public modbus::ModbusDevice, public Component {
 
  protected:
   uint16_t port_{502};
+  size_t request_queue_limit_{10};
   sensor::Sensor *clients_connected_sensor_{nullptr};
   sensor::Sensor *messages_handled_sensor_{nullptr};
   sensor::Sensor *errors_sensor_{nullptr};
@@ -37,10 +39,13 @@ class ModbusProxy : public modbus::ModbusDevice, public Component {
   uint32_t error_count_{0};
   std::unique_ptr<socket::Socket> server_socket_;
   
+  static const size_t MAX_RX_BUFFER_SIZE = 300;
+
   struct Client {
     std::unique_ptr<socket::Socket> socket;
     std::string identifier; // IP:Port for logging
-    std::vector<uint8_t> rx_buffer;
+    uint8_t rx_buffer[MAX_RX_BUFFER_SIZE];
+    size_t rx_len{0};
     uint32_t last_activity{0};
   };
   std::vector<std::unique_ptr<Client>> clients_;

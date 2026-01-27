@@ -2,6 +2,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include <cerrno>
+#include <cstring>
+#include <vector>
 
 namespace esphome {
 namespace modbus_proxy {
@@ -62,37 +64,50 @@ void ModbusProxy::loop() {
   for (auto &client : this->clients_) {
      if (client->socket == nullptr) continue;
 
-     uint8_t buf[128];
-     ssize_t len = client->socket->read(buf, sizeof(buf));
+     uint8_t *buf = client->rx_buffer + client->rx_len;
+     size_t space_available = MAX_RX_BUFFER_SIZE - client->rx_len;
+     
+     if (space_available == 0) {
+         ESP_LOGW(TAG, "Client buffer full, disconnecting %s", client->identifier.c_str());
+         client->socket->close();
+         client->socket = nullptr;
+         continue;
+     }
+
+     ssize_t len = client->socket->read(buf, space_available);
      if (len > 0) {
         client->last_activity = millis();
-        client->rx_buffer.insert(client->rx_buffer.end(), buf, buf + len);
+        client->rx_len += len;
         
-        while (client->rx_buffer.size() >= 6) {
+        while (client->rx_len >= 6) {
              // Check header: TransID(2), ProtoID(2), Len(2)
              uint16_t proto_id = (client->rx_buffer[2] << 8) | client->rx_buffer[3];
              if (proto_id != 0) {
                  ESP_LOGW(TAG, "Invalid Protocol Key %04X from %s", proto_id, client->identifier.c_str());
-                 client->rx_buffer.clear(); 
+                 client->socket->close();
+                 client->socket = nullptr; 
                  break;
              }
              
              uint16_t msg_len = (client->rx_buffer[4] << 8) | client->rx_buffer[5];
              if (msg_len < 2) { 
                  ESP_LOGW(TAG, "Invalid Length %d from %s", msg_len, client->identifier.c_str());
-                 client->rx_buffer.erase(client->rx_buffer.begin(), client->rx_buffer.begin() + 6);
-                 continue;
+                 client->socket->close();
+                 client->socket = nullptr;
+                 break;
              }
              
-             if (client->rx_buffer.size() >= 6 + msg_len) {
+             size_t total_frame_len = 6 + msg_len;
+             if (client->rx_len >= total_frame_len) {
                  // Full frame received
                  uint16_t trans_id = (client->rx_buffer[0] << 8) | client->rx_buffer[1];
                  uint8_t unit_id = client->rx_buffer[6];
                  uint8_t func_code = client->rx_buffer[7];
                  
                  std::vector<uint8_t> payload;
+                 payload.reserve(msg_len); 
                  // Payload for send_raw: [UnitID][PDU...]
-                 payload.insert(payload.end(), client->rx_buffer.begin() + 6, client->rx_buffer.begin() + 6 + msg_len);
+                 payload.insert(payload.end(), client->rx_buffer + 6, client->rx_buffer + 6 + msg_len);
                  
                  PendingRequest req;
                  req.client = client.get();
@@ -100,18 +115,19 @@ void ModbusProxy::loop() {
                  req.protocol_id = proto_id;
                  req.unit_id = unit_id;
                  req.function_code = func_code;
-                 req.payload = payload;
+                 req.payload = std::move(payload);
                  req.timestamp = millis();
                  
-                 if (payload.size() >= 6) {
-                      uint16_t start_addr = (payload[2] << 8) | payload[3];
-                      uint16_t count = (payload[4] << 8) | payload[5];
+                 const auto &pl = req.payload; 
+                 if (pl.size() >= 6) {
+                      uint16_t start_addr = (pl[2] << 8) | pl[3];
+                      uint16_t count = (pl[4] << 8) | pl[5];
                       if (func_code >= 0x01 && func_code <= 0x04) {
                            ESP_LOGD(TAG, "Modbus Request: UnitID=%d Func=%d StartAddr=0x%04X Count=%d", unit_id, func_code, start_addr, count);
                       } else if (func_code == 0x05 || func_code == 0x06) {
                            ESP_LOGD(TAG, "Modbus Request: UnitID=%d Func=%d Addr=0x%04X Value=0x%04X", unit_id, func_code, start_addr, count);
                       } else if (func_code == 0x0F || func_code == 0x10) {
-                           ESP_LOGD(TAG, "Modbus Request: UnitID=%d Func=%d StartAddr=0x%04X Count=%d ByteCount=%d", unit_id, func_code, start_addr, count, payload.size() > 6 ? payload[6] : 0);
+                           ESP_LOGD(TAG, "Modbus Request: UnitID=%d Func=%d StartAddr=0x%04X Count=%d ByteCount=%d", unit_id, func_code, start_addr, count, pl.size() > 6 ? pl[6] : 0);
                       } else {
                            ESP_LOGD(TAG, "Modbus Request: UnitID=%d Func=%d Len=%d", unit_id, func_code, msg_len);
                       }
@@ -120,11 +136,25 @@ void ModbusProxy::loop() {
                  }
                  ESP_LOGV(TAG, "Modbus TCP Request: UnitID=%d Func=%d TransID=%d Len=%d", unit_id, func_code, trans_id, msg_len);
 
-                 this->request_queue_.push_back(req);
+                 if (this->request_queue_.size() >= this->request_queue_limit_) {
+                      ESP_LOGW(TAG, "Request queue full, dropping request from %s", client->identifier.c_str());
+                      this->send_tcp_error_(client.get(), trans_id, proto_id, unit_id, func_code, 0x06); // 0x06 = Server Device Busy
+                 } else {
+                      this->request_queue_.push_back(std::move(req));
+                 }
                  
                  // Consume
-                 client->rx_buffer.erase(client->rx_buffer.begin(), client->rx_buffer.begin() + 6 + msg_len);
+                 size_t remaining = client->rx_len - total_frame_len;
+                 if (remaining > 0) {
+                     memmove(client->rx_buffer, client->rx_buffer + total_frame_len, remaining);
+                 }
+                 client->rx_len = remaining;
              } else {
+                 if (total_frame_len > MAX_RX_BUFFER_SIZE) {
+                     ESP_LOGE(TAG, "Frame too large %zu from %s", total_frame_len, client->identifier.c_str());
+                     client->socket->close();
+                     client->socket = nullptr;
+                 }
                  break; // Wait for more data
              }
         }
@@ -252,22 +282,27 @@ void ModbusProxy::on_modbus_error(uint8_t function_code, uint8_t exception_code)
 }
 
 void ModbusProxy::send_tcp_response_(Client *client, uint16_t transaction_id, uint16_t protocol_id, uint8_t unit_id, const std::vector<uint8_t> &pdu) {
-    std::vector<uint8_t> frame;
-    frame.push_back(transaction_id >> 8);
-    frame.push_back(transaction_id & 0xFF);
-    frame.push_back(protocol_id >> 8);
-    frame.push_back(protocol_id & 0xFF);
+    uint8_t frame[300];
+    if (pdu.size() + 7 > sizeof(frame)) {
+       ESP_LOGW(TAG, "Response too large to send");
+       return;
+    }
+    
+    frame[0] = transaction_id >> 8;
+    frame[1] = transaction_id & 0xFF;
+    frame[2] = protocol_id >> 8;
+    frame[3] = protocol_id & 0xFF;
     
     uint16_t len = 1 + pdu.size(); // UnitID + PDU
-    frame.push_back(len >> 8);
-    frame.push_back(len & 0xFF);
+    frame[4] = len >> 8;
+    frame[5] = len & 0xFF;
     
-    frame.push_back(unit_id);
-    frame.insert(frame.end(), pdu.begin(), pdu.end());
+    frame[6] = unit_id;
+    memcpy(frame + 7, pdu.data(), pdu.size());
     
-    ESP_LOGV(TAG, "Sending Modbus TCP Response TransID=%d Len=%zu", transaction_id, frame.size());
+    ESP_LOGV(TAG, "Sending Modbus TCP Response TransID=%d Len=%zu", transaction_id, pdu.size() + 7);
 
-    client->socket->write(frame.data(), frame.size());
+    client->socket->write(frame, 7 + pdu.size());
     
     this->message_count_++;
     if (this->messages_handled_sensor_ != nullptr) {
@@ -276,23 +311,23 @@ void ModbusProxy::send_tcp_response_(Client *client, uint16_t transaction_id, ui
 }
 
 void ModbusProxy::send_tcp_error_(Client *client, uint16_t transaction_id, uint16_t protocol_id, uint8_t unit_id, uint8_t function_code, uint8_t exception_code) {
-    std::vector<uint8_t> frame;
-    frame.push_back(transaction_id >> 8);
-    frame.push_back(transaction_id & 0xFF);
-    frame.push_back(protocol_id >> 8);
-    frame.push_back(protocol_id & 0xFF);
+    uint8_t frame[9];
+    frame[0] = transaction_id >> 8;
+    frame[1] = transaction_id & 0xFF;
+    frame[2] = protocol_id >> 8;
+    frame[3] = protocol_id & 0xFF;
     
     uint16_t len = 3; // UnitID + FC + Exception
-    frame.push_back(len >> 8);
-    frame.push_back(len & 0xFF);
+    frame[4] = len >> 8;
+    frame[5] = len & 0xFF;
     
-    frame.push_back(unit_id);
-    frame.push_back(function_code | 0x80); // Error flag
-    frame.push_back(exception_code);
+    frame[6] = unit_id;
+    frame[7] = function_code | 0x80; // Error flag
+    frame[8] = exception_code;
     
     ESP_LOGW(TAG, "Sending Modbus TCP Error TransID=%d Exception=%d", transaction_id, exception_code);
 
-    client->socket->write(frame.data(), frame.size());
+    client->socket->write(frame, 9);
     
     this->error_count_++;
     if (this->errors_sensor_ != nullptr) {
@@ -310,6 +345,7 @@ void ModbusProxy::check_cleanup_clients_() {
 void ModbusProxy::dump_config() {
      ESP_LOGCONFIG(TAG, "Modbus Proxy:");
      ESP_LOGCONFIG(TAG, "  Port: %d", this->port_);
+     ESP_LOGCONFIG(TAG, "  Max Queue Size: %zu", this->request_queue_limit_);
 }
 
 }

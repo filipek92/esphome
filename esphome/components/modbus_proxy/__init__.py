@@ -9,6 +9,7 @@ AUTO_LOAD = ["socket", "sensor"]
 CONF_CLIENTS_CONNECTED = "clients_connected"
 CONF_MESSAGES_HANDLED = "messages_handled"
 CONF_ERRORS = "errors"
+CONF_MAX_QUEUE_SIZE = "max_queue_size"
 
 modbus_proxy_ns = cg.esphome_ns.namespace("modbus_proxy")
 ModbusProxy = modbus_proxy_ns.class_("ModbusProxy", modbus.ModbusDevice, cg.Component)
@@ -17,6 +18,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(ModbusProxy),
     cv.GenerateID(modbus.CONF_MODBUS_ID): cv.use_id(modbus.Modbus),
     cv.Optional(CONF_PORT, default=502): cv.port,
+    cv.Optional(CONF_MAX_QUEUE_SIZE, default=10): cv.positive_int,
     cv.Optional(CONF_CLIENTS_CONNECTED): sensor.sensor_schema(
         unit_of_measurement="clients",
         accuracy_decimals=0,
@@ -41,6 +43,7 @@ async def to_code(config):
     cg.add(parent.register_device(var))
     
     cg.add(var.set_port(config[CONF_PORT]))
+    cg.add(var.set_request_queue_limit(config[CONF_MAX_QUEUE_SIZE]))
 
     if CONF_CLIENTS_CONNECTED in config:
         sens = await sensor.new_sensor(config[CONF_CLIENTS_CONNECTED])
