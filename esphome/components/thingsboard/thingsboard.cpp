@@ -325,7 +325,21 @@ void ThingsBoardBridge::process_shared_attributes(const std::string &payload) {
   for (JsonPair kv : root) {
     std::string value_str;
     serializeJson(kv.value(), value_str);
-    this->attribute_trigger_.trigger(std::string(kv.key().c_str()), value_str);
+    std::string key_str = std::string(kv.key().c_str());
+    
+    // Zkusit aktualizovat registrovaný global atribut
+    for (const auto &entry : this->global_attributes_) {
+      if (entry.key == key_str && entry.value_setter) {
+        if (entry.value_setter(value_str)) {
+          ESP_LOGI(TAG, "Updated global attribute '%s' from shared attribute", key_str.c_str());
+        } else {
+          ESP_LOGW(TAG, "Failed to parse value for global attribute '%s': %s", key_str.c_str(), value_str.c_str());
+        }
+        break;
+      }
+    }
+    
+    this->attribute_trigger_.trigger(key_str, value_str);
   }
 
 #ifdef USE_LOG_LISTENERS

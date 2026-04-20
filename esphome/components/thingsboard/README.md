@@ -60,6 +60,9 @@ Navíc všechny **neinterní** `text_sensor` entity se automaticky odesílají j
 Přes `attribute_globals` můžete do ThingsBoard publikovat hodnoty z `globals` jako device attributes.
 Každý zadaný `global` se odešle pod stejným klíčem, jako je jeho `id`.
 
+**Aktualizace z ThingsBoard:** Když ThingsBoard odešle shared atribut se stejným klíčem, komponenta jej automaticky 
+aplikuje na odpovídající global (pokud je kompletibní typem). To umožňuje vzdálené řízení globálních proměnných bez OTA:
+
 ```yaml
 globals:
   - id: uptime_counter
@@ -70,15 +73,30 @@ globals:
     type: std::string
     initial_value: '"stable"'
 
+  - id: temperature_offset
+    type: float
+    initial_value: "0.0"
+
 thingsboard:
   server: your-thingsboard-server.com
   token: YOUR_DEVICE_ACCESS_TOKEN
   attribute_globals:
     - uptime_counter
     - firmware_channel
+    - temperature_offset
 ```
 
-Tyto hodnoty se odešlou při úvodním syncu po připojení MQTT (spolu s ostatními device attributes).
+Z ThingsBoard pak můžete nastavit shared atributy (Device → Attributes → Shared attributes):
+```
+uptime_counter = 1000
+firmware_channel = "beta"
+temperature_offset = 0.5
+```
+
+Zařízení se hodnoty přijde a automaticky je aplikuje na odpovídající globály.
+Logy o úspěšné aktualizaci či chybě parsování se zobrazí v logech ESPHome.
+
+Tyto hodnoty se odesílají při úvodním syncu po připojení MQTT (spolu s ostatními device attributes).
 
 ## Ovládání z ThingsBoard (RPC)
 

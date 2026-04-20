@@ -73,6 +73,9 @@ class ThingsBoardBridge : public Component
     this->global_attributes_.push_back({
         key,
         [global]() { return ThingsBoardBridge::global_value_to_string_(id(global)); },
+        [global](const std::string &value_str) { 
+          return ThingsBoardBridge::update_global_from_json_<std::decay_t<decltype(id(global))>>(id(global), value_str); 
+        },
     });
   }
 
@@ -104,6 +107,7 @@ class ThingsBoardBridge : public Component
   struct GlobalAttributeEntry {
     std::string key;
     std::function<std::string()> value_getter;
+    std::function<bool(const std::string &)> value_setter;  // Returns true if successfully updated
   };
 
   template<typename T> static std::string global_value_to_string_(const T &value) {
@@ -123,6 +127,37 @@ class ThingsBoardBridge : public Component
     } else {
       return "<unsupported_type>";
     }
+  }
+
+  template<typename T> static bool update_global_from_json_(T &global, const std::string &json_value_str) {
+    using value_t = std::decay_t<T>;
+    JsonDocument doc;
+    if (deserializeJson(doc, json_value_str)) {
+      return false;
+    }
+    
+    if constexpr (std::is_same_v<value_t, std::string>) {
+      if (doc.is<const char *>()) {
+        global = std::string(doc.as<const char *>());
+        return true;
+      }
+    } else if constexpr (std::is_same_v<value_t, bool>) {
+      if (doc.is<bool>()) {
+        global = doc.as<bool>();
+        return true;
+      }
+    } else if constexpr (std::is_floating_point_v<value_t>) {
+      if (doc.is<double>()) {
+        global = static_cast<T>(doc.as<double>());
+        return true;
+      }
+    } else if constexpr (std::is_integral_v<value_t>) {
+      if (doc.is<long long>()) {
+        global = static_cast<T>(doc.as<long long>());
+        return true;
+      }
+    }
+    return false;
   }
 
   std::string server_;
