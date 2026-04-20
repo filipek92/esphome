@@ -296,6 +296,28 @@ thingsboard:
           args: [key.c_str(), value.c_str()]
 ```
 
+## Podmínky
+
+Komponenta přidává podmínku `thingsboard.connected`, kterou lze použít v automatizacích
+pro kontrolu, zda je bridge právě připojený k ThingsBoard MQTT.
+
+```yaml
+thingsboard:
+  id: tb_bridge
+  server: your-server.com
+  token: YOUR_TOKEN
+
+interval:
+  - interval: 30s
+    then:
+      - if:
+          condition:
+            thingsboard.connected:
+              id: tb_bridge
+          then:
+            - logger.log: "ThingsBoard je připojený"
+```
+
 ### Příklad: Vlastní RPC příkaz
 
 ```yaml

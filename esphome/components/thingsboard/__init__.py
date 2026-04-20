@@ -19,6 +19,9 @@ thingsboard_ns = cg.esphome_ns.namespace('thingsboard')
 ThingsBoardBridge = thingsboard_ns.class_('ThingsBoardBridge', cg.Component)
 SendTelemetryAction = thingsboard_ns.class_('SendTelemetryAction', automation.Action)
 SendAttributeAction = thingsboard_ns.class_('SendAttributeAction', automation.Action)
+ThingsBoardConnectedCondition = thingsboard_ns.class_(
+    'ThingsBoardConnectedCondition', automation.Condition
+)
 
 CONF_KEY = "key"
 CONF_VALUE = "value"
@@ -125,3 +128,17 @@ async def send_attribute_action_to_code(config, action_id, template_arg, args):
     templ = await cg.templatable(config[CONF_VALUE], args, cg.std_string)
     cg.add(var.set_value(templ))
     return var
+
+
+@automation.register_condition(
+    "thingsboard.connected",
+    ThingsBoardConnectedCondition,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(ThingsBoardBridge),
+        }
+    ),
+)
+async def thingsboard_connected_to_code(config, condition_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(condition_id, template_arg, parent)

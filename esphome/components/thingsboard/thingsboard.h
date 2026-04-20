@@ -59,6 +59,15 @@ class ThingsBoardBridge : public Component
   void process_shared_attributes(const std::string &payload);
   void send_device_attributes();
   void send_initial_state();
+  bool is_connected() const {
+#ifdef USE_ARDUINO
+    return this->mqttClient.connected();
+#elif defined(USE_ESP_IDF)
+    return this->is_connected_;
+#else
+    return false;
+#endif
+  }
   void send_telemetry(std::string id, float value);
   void send_telemetry(std::string id, bool value);
   void send_telemetry(std::string id, std::string value);
@@ -214,6 +223,15 @@ template<typename... Ts> class SendAttributeAction : public Action<Ts...> {
   void play(Ts... x) override {
     this->bridge_->send_attribute(this->key_.value(x...), this->value_.value(x...));
   }
+
+ protected:
+  ThingsBoardBridge *bridge_;
+};
+
+template<typename... Ts> class ThingsBoardConnectedCondition : public Condition<Ts...> {
+ public:
+  explicit ThingsBoardConnectedCondition(ThingsBoardBridge *bridge) : bridge_(bridge) {}
+  bool check(const Ts &...x) override { return this->bridge_->is_connected(); }
 
  protected:
   ThingsBoardBridge *bridge_;
