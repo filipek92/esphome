@@ -1,12 +1,15 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
+from esphome.components import globals as globals_component
 from esphome.const import CONF_ID, CONF_PORT, CONF_LEVEL, CONF_TRIGGER_ID
 from esphome.core import CORE
 
 CONF_SERVER = "server"
 CONF_TOKEN = "token"
 CONF_LOG_LEVEL = "log_level"
+CONF_AUTO_TELEMETRY = "auto_telemetry"
+CONF_ATTRIBUTE_GLOBALS = "attribute_globals"
 CONF_ON_RPC = "on_rpc"
 CONF_ON_ATTRIBUTE = "on_attribute"
 
@@ -37,6 +40,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_TOKEN): cv.string,
     cv.Optional(CONF_PORT, default=8883): cv.port,
     cv.Optional(CONF_LOG_LEVEL): cv.one_of(*LOG_LEVELS, upper=True),
+    cv.Optional(CONF_AUTO_TELEMETRY, default=True): cv.boolean,
+    cv.Optional(CONF_ATTRIBUTE_GLOBALS, default=[]): cv.ensure_list(
+        cv.use_id(globals_component.GlobalsComponent)
+    ),
     cv.Optional(CONF_ON_RPC): automation.validate_automation(single=True),
     cv.Optional(CONF_ON_ATTRIBUTE): automation.validate_automation(single=True),
 }).extend(cv.COMPONENT_SCHEMA)
@@ -44,6 +51,11 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID], config[CONF_SERVER], config[CONF_PORT], config[CONF_TOKEN])
     await cg.register_component(var, config)
+    cg.add(var.set_auto_telemetry(config[CONF_AUTO_TELEMETRY]))
+
+    for global_id in config[CONF_ATTRIBUTE_GLOBALS]:
+        global_var = await cg.get_variable(global_id)
+        cg.add(var.add_global_attribute(global_id.id, global_var))
 
     if CONF_LOG_LEVEL in config:
         cg.add(var.set_log_level(LOG_LEVELS[config[CONF_LOG_LEVEL]]))

@@ -9,6 +9,10 @@ thingsboard:
   server: your-thingsboard-server.com
   token: YOUR_DEVICE_ACCESS_TOKEN
   port: 8883  # volitelné, výchozí 8883 (MQTTS)
+  auto_telemetry: true  # volitelné, automatické posílání stavů entit
+  attribute_globals:  # volitelné, globals proměnné odeslané jako device attributes
+    - uptime_counter
+    - firmware_channel
   log_level: WARN  # volitelné, přeposílání logů do ThingsBoard
 ```
 
@@ -17,6 +21,8 @@ thingsboard:
 | `server`    | ano     | —       | Adresa ThingsBoard serveru               |
 | `token`     | ano     | —       | Access Token zařízení z ThingsBoard      |
 | `port`      | ne      | `8883`  | Port MQTT brokeru (8883 = TLS, 1883 = bez TLS) |
+| `auto_telemetry` | ne | `true` | Automatické odesílání telemetrie z entit |
+| `attribute_globals` | ne | `[]` | Seznam `globals` ID, které se publikují jako device attributes |
 | `log_level` | ne      | —       | Úroveň logů odesílaných do ThingsBoard  |
 
 ## Co komponenta dělá automaticky
@@ -36,6 +42,10 @@ Všechny **neinterní** entity se automaticky odesílají jako telemetrie:
 
 Klíč v telemetrii je `object_id` entity (např. `temperature`, `relay_1`).
 
+Pokud nastavíte `auto_telemetry: false`, komponenta automatickou telemetrii neposílá.
+To je vhodné, když si filtraci a frekvenci odesílání chcete řídit sami přes automatizace
+(`thingsboard.send_telemetry`, `interval`, vlastní podmínky).
+
 ### Atributy zařízení
 
 Při prvním připojení se odešlou atributy:
@@ -44,6 +54,31 @@ Při prvním připojení se odešlou atributy:
 - `build_date` — datum kompilace
 
 Navíc všechny **neinterní** `text_sensor` entity se automaticky odesílají jako device attributes (při každé změně hodnoty).
+
+### Atributy z `globals`
+
+Přes `attribute_globals` můžete do ThingsBoard publikovat hodnoty z `globals` jako device attributes.
+Každý zadaný `global` se odešle pod stejným klíčem, jako je jeho `id`.
+
+```yaml
+globals:
+  - id: uptime_counter
+    type: int
+    initial_value: "0"
+
+  - id: firmware_channel
+    type: std::string
+    initial_value: '"stable"'
+
+thingsboard:
+  server: your-thingsboard-server.com
+  token: YOUR_DEVICE_ACCESS_TOKEN
+  attribute_globals:
+    - uptime_counter
+    - firmware_channel
+```
+
+Tyto hodnoty se odešlou při úvodním syncu po připojení MQTT (spolu s ostatními device attributes).
 
 ## Ovládání z ThingsBoard (RPC)
 

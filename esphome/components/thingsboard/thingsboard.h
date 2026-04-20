@@ -7,7 +7,10 @@
 #include "esphome/core/log.h"
 #include <ArduinoJson.h>
 #include <cmath>
+#include <cstdio>
+#include <functional>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <mutex>
 
@@ -64,6 +67,14 @@ class ThingsBoardBridge : public Component
   Trigger<std::string, std::string> *get_rpc_trigger() { return &this->rpc_trigger_; }
   Trigger<std::string, std::string> *get_attribute_trigger() { return &this->attribute_trigger_; }
   void set_rpc_response(const std::string &response) { this->rpc_response_ = response; }
+  void set_auto_telemetry(bool auto_telemetry) { this->auto_telemetry_ = auto_telemetry; }
+
+  template<typename TGlobal> void add_global_attribute(const std::string &key, TGlobal *global) {
+    this->global_attributes_.push_back({
+        key,
+        [global]() { return ThingsBoardBridge::global_value_to_string_(id(global)); },
+    });
+  }
 
   // Overloads for attribute sending from lambdas
   void send_attribute(std::string id, float value);
@@ -90,11 +101,37 @@ class ThingsBoardBridge : public Component
 #endif
 
  protected:
+  struct GlobalAttributeEntry {
+    std::string key;
+    std::function<std::string()> value_getter;
+  };
+
+  template<typename T> static std::string global_value_to_string_(const T &value) {
+    using value_t = std::decay_t<T>;
+    if constexpr (std::is_same_v<value_t, std::string>) {
+      return value;
+    } else if constexpr (std::is_same_v<value_t, bool>) {
+      return value ? "true" : "false";
+    } else if constexpr (std::is_floating_point_v<value_t>) {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%.6f", static_cast<double>(value));
+      return std::string(buf);
+    } else if constexpr (std::is_integral_v<value_t>) {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(value));
+      return std::string(buf);
+    } else {
+      return "<unsupported_type>";
+    }
+  }
+
   std::string server_;
   uint16_t port_;
   std::string token_;
+  bool auto_telemetry_{true};
   bool attributes_sent_{false};
   std::vector<LightStateEntry> light_states_;
+  std::vector<GlobalAttributeEntry> global_attributes_;
   Trigger<std::string, std::string> rpc_trigger_;
   Trigger<std::string, std::string> attribute_trigger_;
   std::string rpc_response_;

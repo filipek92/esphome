@@ -78,46 +78,61 @@ void ThingsBoardBridge::setup() {
 #endif
 
   // Registrace společných senzorů (stejné pro oba frameworky)
+  if (this->auto_telemetry_) {
 #ifdef USE_SENSOR
-  for (auto *obj : App.get_sensors()) {
-    if (!obj->is_internal()) obj->add_on_state_callback([this, obj](float state) { this->send_telemetry(tb_get_id(obj), state); });
-  }
+    for (auto *obj : App.get_sensors()) {
+      if (!obj->is_internal()) {
+        obj->add_on_state_callback([this, obj](float state) { this->send_telemetry(tb_get_id(obj), state); });
+      }
+    }
 #endif
 #ifdef USE_BINARY_SENSOR
-  for (auto *obj : App.get_binary_sensors()) {
-    if (!obj->is_internal()) obj->add_on_state_callback([this, obj](bool state) { this->send_telemetry(tb_get_id(obj), state); });
-  }
+    for (auto *obj : App.get_binary_sensors()) {
+      if (!obj->is_internal()) {
+        obj->add_on_state_callback([this, obj](bool state) { this->send_telemetry(tb_get_id(obj), state); });
+      }
+    }
 #endif
 #ifdef USE_NUMBER
-  for (auto *obj : App.get_numbers()) {
-    if (!obj->is_internal()) obj->add_on_state_callback([this, obj](float state) { this->send_telemetry(tb_get_id(obj), state); });
-  }
+    for (auto *obj : App.get_numbers()) {
+      if (!obj->is_internal()) {
+        obj->add_on_state_callback([this, obj](float state) { this->send_telemetry(tb_get_id(obj), state); });
+      }
+    }
 #endif
 #ifdef USE_SWITCH
-  for (auto *obj : App.get_switches()) {
-    if (!obj->is_internal()) obj->add_on_state_callback([this, obj](bool state) { this->send_telemetry(tb_get_id(obj), state); });
-  }
+    for (auto *obj : App.get_switches()) {
+      if (!obj->is_internal()) {
+        obj->add_on_state_callback([this, obj](bool state) { this->send_telemetry(tb_get_id(obj), state); });
+      }
+    }
 #endif
 #ifdef USE_SELECT
-  for (auto *obj : App.get_selects()) {
-    if (!obj->is_internal()) obj->add_on_state_callback([this, obj](const std::string &state, size_t index) { this->send_telemetry(tb_get_id(obj), state); });
-  }
+    for (auto *obj : App.get_selects()) {
+      if (!obj->is_internal()) {
+        obj->add_on_state_callback(
+            [this, obj](const std::string &state, size_t index) { this->send_telemetry(tb_get_id(obj), state); });
+      }
+    }
 #endif
+  }
 #ifdef USE_TEXT_SENSOR
   for (auto *obj : App.get_text_sensors()) {
     if (!obj->is_internal()) obj->add_on_state_callback([this, obj](const std::string &state) { this->send_attribute(tb_get_id(obj), state); });
   }
 #endif
+  if (this->auto_telemetry_) {
 #ifdef USE_LIGHT
-  for (auto *obj : App.get_lights()) {
-    if (!obj->is_internal()) {
-      LightStateEntry entry;
-      entry.id = tb_get_id(obj);
-      entry.is_on = obj->remote_values.is_on();
-      this->light_states_.push_back(entry);
+    for (auto *obj : App.get_lights()) {
+      if (!obj->is_internal()) {
+        LightStateEntry entry;
+        entry.id = tb_get_id(obj);
+        entry.is_on = obj->remote_values.is_on();
+        this->light_states_.push_back(entry);
+      }
     }
-  }
 #endif
+  }
 
 #ifdef USE_LOG_LISTENERS
   if (this->log_level_ > ESPHOME_LOG_LEVEL_NONE && !this->log_listener_registered_ && logger::global_logger != nullptr) {
@@ -150,22 +165,24 @@ void ThingsBoardBridge::loop() {
       this->send_initial_state();
       this->attributes_sent_ = true;
     }
+    if (this->auto_telemetry_) {
 #ifdef USE_LIGHT
-    for (auto &entry : this->light_states_) {
-      // entry.id is a pointer to the object_id string stored by EntityBase
-      // find the matching light to check current state
-      for (auto *obj : App.get_lights()) {
-        if (!obj->is_internal() && tb_get_id(obj) == entry.id) {
-          bool is_on = obj->remote_values.is_on();
-          if (entry.is_on != is_on) {
-            entry.is_on = is_on;
-            this->send_telemetry(entry.id, is_on);
+      for (auto &entry : this->light_states_) {
+        // entry.id is a pointer to the object_id string stored by EntityBase
+        // find the matching light to check current state
+        for (auto *obj : App.get_lights()) {
+          if (!obj->is_internal() && tb_get_id(obj) == entry.id) {
+            bool is_on = obj->remote_values.is_on();
+            if (entry.is_on != is_on) {
+              entry.is_on = is_on;
+              this->send_telemetry(entry.id, is_on);
+            }
+            break;
           }
-          break;
         }
       }
-    }
 #endif
+    }
   }
   if (this->attributes_sent_ && !this->mqttClient.connected()) this->attributes_sent_ = false;
 
@@ -179,20 +196,22 @@ void ThingsBoardBridge::loop() {
       this->send_initial_state();
       this->attributes_sent_ = true;
     }
+    if (this->auto_telemetry_) {
 #ifdef USE_LIGHT
-    for (auto &entry : this->light_states_) {
-      for (auto *obj : App.get_lights()) {
-        if (!obj->is_internal() && tb_get_id(obj) == entry.id) {
-          bool is_on = obj->remote_values.is_on();
-          if (entry.is_on != is_on) {
-            entry.is_on = is_on;
-            this->send_telemetry(entry.id, is_on);
+      for (auto &entry : this->light_states_) {
+        for (auto *obj : App.get_lights()) {
+          if (!obj->is_internal() && tb_get_id(obj) == entry.id) {
+            bool is_on = obj->remote_values.is_on();
+            if (entry.is_on != is_on) {
+              entry.is_on = is_on;
+              this->send_telemetry(entry.id, is_on);
+            }
+            break;
           }
-          break;
         }
       }
-    }
 #endif
+    }
   }
 #endif
 }
@@ -444,11 +463,19 @@ void ThingsBoardBridge::send_device_attributes() {
 #elif defined(USE_ESP_IDF)
   esp_mqtt_client_publish(this->mqtt_client_, "v1/devices/me/attributes", buf, 0, 0, 0);
 #endif
+
+  for (const auto &entry : this->global_attributes_) {
+    this->send_attribute(entry.key, entry.value_getter());
+  }
 }
 
 void ThingsBoardBridge::send_initial_state() {
   ESP_LOGI(TAG, "Sending initial state...");
   this->send_device_attributes();
+
+  if (!this->auto_telemetry_) {
+    return;
+  }
 
 #ifdef USE_SENSOR
   for (auto *obj : App.get_sensors()) {
