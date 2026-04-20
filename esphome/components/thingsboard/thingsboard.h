@@ -59,6 +59,7 @@ class ThingsBoardBridge : public Component
   void process_shared_attributes(const std::string &payload);
   void send_device_attributes();
   void send_initial_state();
+  void request_shared_attributes();
   bool is_connected() const {
 #ifdef USE_ARDUINO
     return this->mqttClient.connected();
@@ -174,6 +175,7 @@ class ThingsBoardBridge : public Component
   std::string token_;
   bool auto_telemetry_{true};
   bool attributes_sent_{false};
+  uint32_t attribute_request_id_{0};
   std::vector<LightStateEntry> light_states_;
   std::vector<GlobalAttributeEntry> global_attributes_;
   Trigger<std::string, std::string> rpc_trigger_;

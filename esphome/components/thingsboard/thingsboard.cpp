@@ -26,7 +26,7 @@ void tb_mqtt_callback(char* topic, byte* payload, unsigned int length) {
   if (global_tb_bridge) {
     std::string topic_str(topic);
     std::string payload_str((char*)payload, length);
-    if (topic_str == "v1/devices/me/attributes") {
+    if (topic_str == "v1/devices/me/attributes" || topic_str.rfind("v1/devices/me/attributes/response/", 0) == 0) {
       global_tb_bridge->process_shared_attributes(payload_str);
     } else {
       global_tb_bridge->process_rpc(topic_str, payload_str);
@@ -223,6 +223,8 @@ bool ThingsBoardBridge::reconnect() {
     ESP_LOGI(TAG, "MQTT connected");
     this->mqttClient.subscribe("v1/devices/me/rpc/request/+");
     this->mqttClient.subscribe("v1/devices/me/attributes");
+    this->mqttClient.subscribe("v1/devices/me/attributes/response/+");
+    this->request_shared_attributes();
     return true;
   }
   return false;
@@ -277,6 +279,8 @@ void ThingsBoardBridge::process_pending_events_() {
         ESP_LOGI(TAG, "MQTT connected");
         esp_mqtt_client_subscribe(this->mqtt_client_, "v1/devices/me/rpc/request/+", 0);
         esp_mqtt_client_subscribe(this->mqtt_client_, "v1/devices/me/attributes", 0);
+        esp_mqtt_client_subscribe(this->mqtt_client_, "v1/devices/me/attributes/response/+", 0);
+        this->request_shared_attributes();
         break;
       case MQTT_EVENT_DISCONNECTED:
         this->is_connected_ = false;
@@ -284,7 +288,7 @@ void ThingsBoardBridge::process_pending_events_() {
         ESP_LOGW(TAG, "MQTT disconnected");
         break;
       case MQTT_EVENT_DATA:
-        if (evt.topic == "v1/devices/me/attributes") {
+        if (evt.topic == "v1/devices/me/attributes" || evt.topic.rfind("v1/devices/me/attributes/response/", 0) == 0) {
           this->process_shared_attributes(evt.data);
         } else {
           this->process_rpc(evt.topic, evt.data);
@@ -320,8 +324,15 @@ void ThingsBoardBridge::process_shared_attributes(const std::string &payload) {
   if (error)
     return;
 
-  // Zavolat uživatelský trigger pro každý atribut
   JsonObject root = doc.as<JsonObject>();
+  if (root.isNull())
+    return;
+
+  if (root["shared"].is<JsonObject>()) {
+    root = root["shared"].as<JsonObject>();
+  }
+
+  // Zavolat uživatelský trigger pro každý atribut
   for (JsonPair kv : root) {
     std::string value_str;
     serializeJson(kv.value(), value_str);
@@ -357,6 +368,37 @@ void ThingsBoardBridge::process_shared_attributes(const std::string &payload) {
       this->log_listener_registered_ = true;
     }
   }
+#endif
+}
+
+void ThingsBoardBridge::request_shared_attributes() {
+  bool can_send = false;
+#ifdef USE_ARDUINO
+  can_send = this->mqttClient.connected();
+#elif defined(USE_ESP_IDF)
+  can_send = this->is_connected_;
+#endif
+
+  if (!can_send)
+    return;
+
+  std::string shared_keys = "log_level";
+  for (const auto &entry : this->global_attributes_) {
+    if (!shared_keys.empty()) {
+      shared_keys += ",";
+    }
+    shared_keys += entry.key;
+  }
+
+  const uint32_t request_id = ++this->attribute_request_id_;
+  const std::string request_topic = "v1/devices/me/attributes/request/" + to_string(request_id);
+  const std::string request_payload = std::string("{\"sharedKeys\":\"") + shared_keys + "\"}";
+
+  ESP_LOGD(TAG, "Requesting shared attributes: %s", shared_keys.c_str());
+#ifdef USE_ARDUINO
+  this->mqttClient.publish(request_topic.c_str(), request_payload.c_str());
+#elif defined(USE_ESP_IDF)
+  esp_mqtt_client_publish(this->mqtt_client_, request_topic.c_str(), request_payload.c_str(), 0, 0, 0);
 #endif
 }
 

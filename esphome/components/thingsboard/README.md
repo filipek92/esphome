@@ -60,8 +60,10 @@ Navíc všechny **neinterní** `text_sensor` entity se automaticky odesílají j
 Přes `attribute_globals` můžete do ThingsBoard publikovat hodnoty z `globals` jako device attributes.
 Každý zadaný `global` se odešle pod stejným klíčem, jako je jeho `id`.
 
-**Aktualizace z ThingsBoard:** Když ThingsBoard odešle shared atribut se stejným klíčem, komponenta jej automaticky 
-aplikuje na odpovídající global (pokud je kompletibní typem). To umožňuje vzdálené řízení globálních proměnných bez OTA:
+**Aktualizace z ThingsBoard:** Když ThingsBoard odešle shared atribut se stejným klíčem, komponenta jej automaticky
+aplikuje na odpovídající global (pokud je kompatibilní typem). Po MQTT připojení a po každém reconnectu si zařízení
+navíc aktivně vyžádá aktuální hodnoty shared atributů z ThingsBoard, takže se stav dosynchronizuje i po výpadku spojení.
+To umožňuje vzdálené řízení globálních proměnných bez OTA:
 
 ```yaml
 globals:
@@ -93,7 +95,7 @@ firmware_channel = "beta"
 temperature_offset = 0.5
 ```
 
-Zařízení se hodnoty přijde a automaticky je aplikuje na odpovídající globály.
+Zařízení si hodnoty po připojení vyžádá a automaticky je aplikuje na odpovídající globály.
 Logy o úspěšné aktualizaci či chybě parsování se zobrazí v logech ESPHome.
 
 Tyto hodnoty se odesílají při úvodním syncu po připojení MQTT (spolu s ostatními device attributes).
@@ -237,6 +239,7 @@ Logy se odesílají jako telemetrie s klíčem `log`:
 ### Dynamická změna úrovně logování
 
 Úroveň logování lze měnit za běhu přes **shared atributy** v ThingsBoard — bez nutnosti překompilovat firmware.
+Po MQTT připojení a reconnectu si zařízení hodnotu `log_level` aktivně vyžádá, takže se správná úroveň obnoví i po výpadku.
 
 1. V ThingsBoard otevřete **Device** → **Attributes** → záložka **Shared attributes**
 2. Přidejte nebo upravte klíč `log_level` s hodnotou např. `"WARN"`, `"DEBUG"` nebo `"NONE"`
