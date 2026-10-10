@@ -1,0 +1,15 @@
+wifi:
+  ssid: MySSID
+  password: password1
+
+modbus_proxy:
+  modbus_id: modbus_bus
+  port: 502
+  max_clients: 2
+  max_queue_size: 8
+  clients_connected:
+    name: Modbus Proxy Clients
+  messages_handled:
+    name: Modbus Proxy Messages
+  errors:
+    name: Modbus Proxy Errors
