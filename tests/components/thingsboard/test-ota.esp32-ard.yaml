@@ -1,0 +1,3 @@
+packages:
+  thingsboard: !include common.yaml
+  ota: !include common-ota.yaml

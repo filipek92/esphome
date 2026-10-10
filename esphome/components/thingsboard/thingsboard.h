@@ -29,6 +29,8 @@
 namespace esphome {
 namespace thingsboard {
 
+class OtaThingsBoardComponent;
+
 class ThingsBoardBridge;
 extern ThingsBoardBridge *global_tb_bridge;
 
@@ -91,6 +93,12 @@ class ThingsBoardBridge : public Component {
   // Overloads for attribute sending from lambdas
   void send_attribute(std::string id, float value);
   void send_attribute(std::string id, bool value);
+
+  // OTA support
+  void set_ota_component(OtaThingsBoardComponent *ota) { this->ota_component_ = ota; }
+  const std::string &get_server() const { return this->server_; }
+  uint16_t get_port() const { return this->port_; }
+  const std::string &get_token() const { return this->token_; }
 
 #ifdef USE_LOG_LISTENERS
   void set_log_level(uint8_t level) { this->log_level_ = level; }
@@ -186,6 +194,7 @@ class ThingsBoardBridge : public Component {
 #endif
 
   bool apply_rpc_to_entity(const std::string &id, JsonVariant value);
+  OtaThingsBoardComponent *ota_component_{nullptr};
 
   // --- PODMÍNĚNÉ PROMĚNNÉ TŘÍDY ---
 #ifdef USE_ARDUINO

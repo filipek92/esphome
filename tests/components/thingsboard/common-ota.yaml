@@ -1,0 +1,13 @@
+http_request:
+  verify_ssl: false
+
+ota:
+  - platform: thingsboard
+    on_begin:
+      then:
+        - logger.log: "OTA start"
+    on_error:
+      then:
+        - logger.log:
+            format: "OTA update error %d"
+            args: ["x"]

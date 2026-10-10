@@ -4,6 +4,10 @@
 #include "esphome/core/log.h"
 #include "esphome/core/version.h"
 
+#ifdef USE_OTA
+#include "ota/ota_thingsboard.h"
+#endif
+
 #ifdef USE_ESP_IDF
 #include "esp_log.h"
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
@@ -373,6 +377,22 @@ void ThingsBoardBridge::process_shared_attributes(const std::string &payload) {
           });
       this->log_listener_registered_ = true;
     }
+  }
+#endif
+
+  // OTA firmware update via shared attributes
+#ifdef USE_OTA
+  if (this->ota_component_ != nullptr && doc["fw_title"].is<const char *>() && doc["fw_version"].is<const char *>()) {
+    std::string fw_title = doc["fw_title"].as<std::string>();
+    std::string fw_version = doc["fw_version"].as<std::string>();
+    std::string fw_checksum;
+    std::string fw_checksum_algorithm;
+    if (doc["fw_checksum"].is<const char *>())
+      fw_checksum = doc["fw_checksum"].as<std::string>();
+    if (doc["fw_checksum_algorithm"].is<const char *>())
+      fw_checksum_algorithm = doc["fw_checksum_algorithm"].as<std::string>();
+
+    this->ota_component_->on_firmware_attributes(fw_title, fw_version, fw_checksum, fw_checksum_algorithm);
   }
 #endif
 }

@@ -336,6 +336,148 @@ thingsboard:
             - button.press: restart_button
 ```
 
+## OTA aktualizace přes ThingsBoard
+
+Komponenta podporuje **OTA (Over-The-Air) aktualizace firmwaru** přímo z ThingsBoard platformy. Firmware se stahuje přes HTTP(S) z ThingsBoard Firmware API a flashuje na zařízení.
+
+### Jak to funguje
+
+1. V ThingsBoard nahrajete nový firmware (**.bin soubor**) do záložky **OTA updates**
+2. Přiřadíte firmware k zařízení nebo skupině zařízení
+3. ThingsBoard odešle zařízení **shared atributy** (`fw_title`, `fw_version`, `fw_checksum`, `fw_checksum_algorithm`)
+4. Zařízení automaticky stáhne firmware přes HTTP GET a provede OTA update
+5. Po úspěšném updatu se zařízení restartuje s novým firmwarem
+
+### Konfigurace
+
+OTA platforma vyžaduje komponentu `http_request` pro stahování firmwaru:
+
+```yaml
+http_request:
+
+ota:
+  - platform: thingsboard
+
+thingsboard:
+  server: your-thingsboard-server.com
+  token: YOUR_DEVICE_ACCESS_TOKEN
+```
+
+| Klíč                | Povinný | Výchozí       | Popis                              |
+|---------------------|---------|---------------|------------------------------------|
+| `platform`          | ano     | —             | Musí být `thingsboard`             |
+| `thingsboard_id`    | ne      | automaticky   | ID ThingsBoard bridge instance     |
+| `http_request_id`   | ne      | automaticky   | ID http_request komponenty         |
+
+### Závislosti
+
+OTA platforma automaticky vyžaduje:
+- `thingsboard` — ThingsBoard bridge pro MQTT komunikaci
+- `http_request` — HTTP klient pro stahování firmwaru
+- `md5` — pro ověření integrity staženého firmwaru (automaticky načteno)
+
+### Stavový automat OTA
+
+Během aktualizace zařízení hlásí stav do ThingsBoard telemetrie (`fw_state`):
+
+```
+DOWNLOADING → DOWNLOADED → VERIFIED → UPDATING → UPDATED → (reboot)
+```
+
+V případě chyby:
+```
+DOWNLOADING → FAILED (s popisem chyby v fw_error)
+```
+
+| Stav          | Popis                                              |
+|---------------|-----------------------------------------------------|
+| `DOWNLOADING` | Stahování firmwaru z HTTP(S) serveru                |
+| `DOWNLOADED`  | Firmware stažen, probíhá ověření                    |
+| `VERIFIED`    | MD5 checksum ověřen (pokud je k dispozici)          |
+| `UPDATING`    | Zápis do flash paměti                               |
+| `UPDATED`     | Aktualizace dokončena, zařízení se restartuje       |
+| `FAILED`      | Chyba — podrobnosti v telemetrii `fw_error`         |
+
+### Nastavení v ThingsBoard
+
+#### 1. Nahrání firmwaru
+
+1. V ThingsBoard přejděte do **OTA updates** (v levém menu)
+2. Klikněte na **+** (přidat nový firmware)
+3. Vyplňte:
+   - **Title** — název firmwaru (např. `my_device_firmware`)
+   - **Version** — verze (např. `1.2.0`)
+   - **Device profile** — profil zařízení
+4. Nahrajte **.bin** soubor (zkompilovaný firmware z ESPHome)
+5. ThingsBoard automaticky spočítá **checksum**
+
+#### 2. Přiřazení k zařízení
+
+1. Otevřete **Device** → **Details**
+2. V záložce **Firmware** přiřaďte nahrané OTA update
+3. ThingsBoard automaticky odešle `fw_*` shared atributy na zařízení
+
+### Konstrukce URL
+
+Firmware se stahuje z ThingsBoard HTTP API:
+
+```
+http(s)://<server>/api/v1/<token>/firmware?title=<title>&version=<version>
+```
+
+Protokol se volí podle MQTT portu:
+- Port **8883** nebo **443** → `https://`
+- Ostatní porty → `http://`
+
+### Ověření integrity
+
+- Pokud ThingsBoard poskytne **MD5 checksum** (`fw_checksum_algorithm: MD5`), zařízení ověří integritu staženého firmwaru
+- Při neshodě MD5 se firmware **nezaflashuje** a OTA se označí jako `FAILED`
+- Pro jiné algoritmy checksumu (SHA256 apod.) se MD5 ověření přeskočí, ale OTA backend provede vlastní validaci
+
+### Telemetrie po úspěšném OTA
+
+Po úspěšné aktualizaci zařízení odešle:
+
+| Klíč                     | Hodnota                    |
+|--------------------------|----------------------------|
+| `current_fw_title`       | Název nainstalovaného FW   |
+| `current_fw_version`     | Verze nainstalovaného FW   |
+
+### Kompletní příklad
+
+```yaml
+esphome:
+  name: my-device
+
+esp32:
+  board: esp32dev
+
+wifi:
+  ssid: "MyWiFi"
+  password: "password123"
+
+http_request:
+
+ota:
+  - platform: thingsboard
+
+thingsboard:
+  server: thingsboard.example.com
+  token: MY_DEVICE_TOKEN
+  port: 8883
+
+sensor:
+  - platform: dht
+    pin: GPIO4
+    temperature:
+      name: "Teplota"
+    humidity:
+      name: "Vlhkost"
+```
+
+> **Poznámka:** Aby OTA fungovalo, zařízení musí mít dostatek volné flash paměti pro uložení nového firmwaru (dual-partition schéma). To je u ESP32 výchozí nastavení.
+
 ### Vlastní RPC odpověď
 
 V `on_rpc` můžete nastavit vlastní odpověď, kterou ThingsBoard obdrží. Zavolejte `set_rpc_response()` v lambdě:
