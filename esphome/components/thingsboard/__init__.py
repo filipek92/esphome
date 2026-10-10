@@ -85,9 +85,15 @@ async def to_code(config):
     request_log_listener()
 
     if CORE.is_esp32:
-        from esphome.components.esp32 import add_idf_component
+        from esphome.components.esp32 import (
+            add_idf_component,
+            require_certificate_bundle,
+        )
 
         add_idf_component(name="espressif/mqtt", ref="1.0.0")
+        # Port 8883 uses TLS, which verifies the server against the certificate bundle
+        if config[CONF_PORT] == 8883:
+            require_certificate_bundle()
 
     if CORE.using_arduino:
         if CORE.is_esp32:

@@ -14,7 +14,7 @@ thingsboard:
   id: tb_bridge
   server: thingsboard.example.com
   token: test_token
-  port: 1883
+  port: 8883
   log_level: INFO
   attribute_globals:
     - tb_setpoint
