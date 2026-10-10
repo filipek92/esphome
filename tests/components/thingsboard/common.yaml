@@ -1,0 +1,78 @@
+wifi:
+  ssid: MySSID
+  password: password1
+
+globals:
+  - id: tb_setpoint
+    type: float
+    initial_value: "21.5"
+  - id: tb_mode
+    type: std::string
+    initial_value: '"auto"'
+
+thingsboard:
+  id: tb_bridge
+  server: thingsboard.example.com
+  token: test_token
+  port: 1883
+  log_level: INFO
+  attribute_globals:
+    - tb_setpoint
+    - tb_mode
+  on_rpc:
+    then:
+      - logger.log:
+          format: "RPC %s: %s"
+          args: [method.c_str(), params.c_str()]
+  on_attribute:
+    then:
+      - if:
+          condition:
+            thingsboard.connected:
+          then:
+            - thingsboard.send_attribute:
+                key: !lambda return key;
+                value: !lambda return value;
+
+sensor:
+  - platform: template
+    name: Template Sensor
+    lambda: return 42.0;
+    update_interval: 60s
+    on_value:
+      - thingsboard.send_telemetry:
+          key: raw_value
+          value: !lambda return to_string(x);
+
+binary_sensor:
+  - platform: template
+    name: Template Binary Sensor
+
+switch:
+  - platform: template
+    name: Template Switch
+    optimistic: true
+
+number:
+  - platform: template
+    name: Template Number
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+
+select:
+  - platform: template
+    name: Template Select
+    optimistic: true
+    options:
+      - "one"
+      - "two"
+
+text_sensor:
+  - platform: template
+    name: Template Text Sensor
+
+button:
+  - platform: template
+    name: Template Button
